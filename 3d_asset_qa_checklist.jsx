@@ -1,0 +1,1188 @@
+import { useState, useEffect, useCallback } from "react";
+
+const CHECKLIST_DATA = [
+  {
+    category: "模型 Mesh",
+    icon: "◆",
+    color: "#2A6B9C",
+    sections: [
+      {
+        title: "拓撲結構 Topology",
+        items: [
+          { id: "topo-1", label: "以四邊面 (Quads) 為主，無極端長尖四角面", critical: true },
+          { id: "topo-2", label: "Loop / Ring 結構運算正常，可快速選取並優化" },
+          { id: "topo-3", label: "如有形變 (Deformation) 需求，無三角面導致的硬感/旋轉處碎裂" },
+          { id: "topo-5", label: "法線插植均勻，無混亂三角面拓樸造成的黑斑/光影閃爍" },
+        ],
+      },
+      {
+        title: "流行幾何 Manifold Geometry",
+        items: [
+          { id: "mani-1", label: "3D mesh 為封閉、無破面、流形幾何體", critical: true },
+          { id: "mani-2", label: "無重疊面、無反向法線" },
+          { id: "mani-3", label: "T-type：所有 edge 被 1 或 2 個面共享（開放邊界或封閉體），未被 3+ 面共享" },
+          { id: "mani-4", label: "無 Open geometry 存在於模型內部（除非已有多層結構內壁等非外殼內部結構）" },
+          { id: "mani-5", label: "無純內嵌面 (Internal faces) 未標記為結構性內壁" },
+          { id: "mani-6", label: "每個頂點的鄰接面形成單一連續面扇，無孤立幾何塊透過同一頂點相連" },
+          { id: "mani-7", label: "所有邊界邊 (boundary edge) 的開口為有意圖的通孔/入口出口，無非目標孔洞" },
+        ],
+      },
+      {
+        title: "面數密度 Polygon Density",
+        items: [
+          { id: "poly-1", label: "面數密度平均分配，結構比例平均" },
+          { id: "poly-2", label: "曲面區域維持最佳曲線，未浪費 polygons" },
+          { id: "poly-3", label: "密集幾何體的原始檔案已經過 retopology" },
+          { id: "poly-4", label: "最佳化面數，baking 掃描或 AI 產出的貼圖資訊可正常使用" },
+        ],
+      },
+      {
+        title: "法線一致性 Normal Consistency",
+        items: [
+          { id: "norm-1", label: "模型中面與面之間的法線指向同個方向", critical: true },
+        ],
+      },
+      {
+        title: "UV 分佈規則",
+        items: [
+          { id: "uv-1", label: "四角面構成的網格展開 UV 最佳化使用效率" },
+          { id: "uv-2", label: "無材質貼圖 (Texture) 在模型表面產生拉伸" },
+        ],
+      },
+      {
+        title: "LOD 系統",
+        items: [
+          { id: "lod-1", label: "LOD_0 = 原始 Asset polycounts (≤200,000)" },
+          { id: "lod-2", label: "LOD_1 = LOD_0 的 50%（≤100,000）" },
+          { id: "lod-3", label: "後續 LOD 層級依比例類推，確認各層級正常顯示" },
+        ],
+      },
+      {
+        title: "命名規則 Naming Convention",
+        items: [
+          { id: "name-1", label: "最外層 Xform 使用駝峰式命名", critical: true },
+          { id: "name-2", label: "底下 Mesh 命名為 SM_Xxxxx (Static Mesh 底線)" },
+          { id: "name-3", label: "層級結構正確（如 WarningSign_A01_PR_NVD_01 → SM_WarningSign_A01_01 → Looks）" },
+        ],
+      },
+      {
+        title: "清理作業 Cleanup",
+        items: [
+          { id: "clean-1", label: "凍結屬性：位移/旋轉歸 0、縮放歸 1，物件為「初始狀態」", critical: true },
+          { id: "clean-2", label: "已消除冗餘座標，確保物件初始狀態正確" },
+          { id: "clean-3", label: "已刪除歷史紀錄，清除建模過程中的運算節點" },
+          { id: "clean-4", label: "檔案大小合理，無累體積並防止引擎讀取錯誤" },
+          { id: "clean-5", label: "Pivot 設定正確：歸位軸心，旋轉與縮放邏輯符合物理常識" },
+          { id: "clean-6", label: "軸向統一座標" },
+        ],
+      },
+    ],
+  },
+  {
+    category: "貼圖 Texture",
+    icon: "◈",
+    color: "#1B7A5A",
+    sections: [
+      {
+        title: "貼圖規劃 Texture Planning",
+        items: [
+          { id: "tex-1", label: "貼圖尺寸為標準值", critical: true, subOptions: ["512", "1024", "2048", "4096"] },
+          { id: "tex-2", label: "多 Mesh 共用同一張貼圖時，UV 座標對應正確" },
+          { id: "tex-3", label: "同類道具排進同一張貼圖（如 UI 圖示、螺絲零件、機台按鈕）" },
+          { id: "tex-4", label: "貼圖格式使用 PNG (24/32-bit) 無損格式" },
+          { id: "tex-5", label: "支援 Alpha 通道的 Opacity，檔案大小優於 .tga" },
+        ],
+      },
+      {
+        title: "PBR 表現",
+        items: [
+          { id: "pbr-1", label: "Albedo (sRGB) 貼圖存在且正確", critical: true },
+          { id: "pbr-2", label: "Roughness / Metallic (linear) 貼圖正確" },
+          { id: "pbr-3", label: "Normal (DirectX, 2x scale/bias) 貼圖正確" },
+          { id: "pbr-4", label: "Opacity 使用 Alpha 通道" },
+        ],
+      },
+      {
+        title: "貼圖整合 ORM",
+        items: [
+          { id: "orm-1", label: "Ambient Occlusion / Roughness / Metallic 已合併為同一張 ORM 貼圖", critical: true },
+        ],
+      },
+    ],
+  },
+  {
+    category: "材質球 Material",
+    icon: "◉",
+    color: "#8B4A2B",
+    sections: [
+      {
+        title: "材質球數量 / 命名管控",
+        items: [
+          { id: "mat-1", label: "Draw Call 數量合理，材質球數量未過多影響 FPS", critical: true },
+          { id: "mat-2", label: "材質球命名規範統一" },
+        ],
+      },
+      {
+        title: "Alpha 透明材質",
+        items: [
+          { id: "alpha-1", label: "透明材質盡量少用" },
+        ],
+      },
+      {
+        title: "Overdraw 管控",
+        items: [
+          { id: "over-1", label: "透明材質與粒子未造成同一像素被多次著色與混合" },
+          { id: "over-2", label: "Overdraw 層數控制合理，GPU 負擔可接受" },
+        ],
+      },
+    ],
+  },
+];
+
+const STORAGE_KEY = "qa-checklist-state";
+
+export default function QAChecklist() {
+  const [checks, setChecks] = useState({});
+  const [notes, setNotes] = useState({});
+  const [editingNote, setEditingNote] = useState(null);
+  const [noteInput, setNoteInput] = useState("");
+  const [assetName, setAssetName] = useState("");
+  const [collapsed, setCollapsed] = useState({});
+  const [filterMode, setFilterMode] = useState("all"); // all, unchecked, critical, failed
+  const [showExport, setShowExport] = useState(false);
+  const [subSelections, setSubSelections] = useState({}); // { "tex-1": ["1024", "2048"] }
+
+  const toggleSubOption = (itemId, option) => {
+    setSubSelections((prev) => {
+      const current = prev[itemId] || [];
+      const next = current.includes(option)
+        ? current.filter((o) => o !== option)
+        : [...current, option];
+      return { ...prev, [itemId]: next };
+    });
+  };
+
+  const allItems = CHECKLIST_DATA.flatMap((c) =>
+    c.sections.flatMap((s) => s.items)
+  );
+  const totalCount = allItems.length;
+  const passedCount = allItems.filter((i) => checks[i.id] === "pass").length;
+  const failedCount = allItems.filter((i) => checks[i.id] === "fail").length;
+  const uncheckedCount = totalCount - passedCount - failedCount;
+  const progress = totalCount > 0 ? ((passedCount + failedCount) / totalCount) * 100 : 0;
+  const checkedCount = passedCount + failedCount;
+  const yieldRate = checkedCount > 0 ? (passedCount / checkedCount) * 100 : null;
+
+  const getCategoryYield = (cat) => {
+    const items = cat.sections.flatMap((s) => s.items);
+    const passed = items.filter((i) => checks[i.id] === "pass").length;
+    const failed = items.filter((i) => checks[i.id] === "fail").length;
+    const checked = passed + failed;
+    return {
+      passed,
+      failed,
+      total: items.length,
+      checked,
+      yield: checked > 0 ? (passed / checked) * 100 : null,
+    };
+  };
+
+  const getYieldColor = (rate) => {
+    if (rate === null) return "var(--text-muted)";
+    if (rate >= 90) return "var(--pass)";
+    if (rate >= 70) return "var(--critical-accent)";
+    return "var(--fail)";
+  };
+
+  const getYieldLabel = (rate) => {
+    if (rate === null) return "未檢查";
+    if (rate >= 90) return "優良";
+    if (rate >= 70) return "待改善";
+    return "不合格";
+  };
+
+  const toggleCollapse = (key) => {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  const setCheck = (id, value) => {
+    setChecks((prev) => {
+      const next = { ...prev };
+      if (next[id] === value) {
+        delete next[id];
+      } else {
+        next[id] = value;
+      }
+      return next;
+    });
+  };
+
+  const openNote = (id) => {
+    setEditingNote(id);
+    setNoteInput(notes[id] || "");
+  };
+
+  const saveNote = () => {
+    if (editingNote) {
+      setNotes((prev) => {
+        const next = { ...prev };
+        if (noteInput.trim()) {
+          next[editingNote] = noteInput.trim();
+        } else {
+          delete next[editingNote];
+        }
+        return next;
+      });
+    }
+    setEditingNote(null);
+    setNoteInput("");
+  };
+
+  const resetAll = () => {
+    if (window.confirm("確定要重置所有檢查項目嗎？")) {
+      setChecks({});
+      setNotes({});
+      setSubSelections({});
+    }
+  };
+
+  const getSectionStats = (section) => {
+    const total = section.items.length;
+    const passed = section.items.filter((i) => checks[i.id] === "pass").length;
+    const failed = section.items.filter((i) => checks[i.id] === "fail").length;
+    return { total, passed, failed, unchecked: total - passed - failed };
+  };
+
+  const shouldShowItem = (item) => {
+    if (filterMode === "all") return true;
+    if (filterMode === "unchecked") return !checks[item.id];
+    if (filterMode === "critical") return item.critical;
+    if (filterMode === "failed") return checks[item.id] === "fail";
+    return true;
+  };
+
+  const generateReport = () => {
+    const now = new Date().toLocaleString("zh-TW");
+    let report = `# 3D Asset QA 檢查報告\n`;
+    report += `Asset: ${assetName || "(未命名)"}\n`;
+    report += `日期: ${now}\n`;
+    report += `進度: ${passedCount}/${totalCount} 通過, ${failedCount} 不通過, ${uncheckedCount} 未檢查\n`;
+    report += `良率: ${yieldRate !== null ? yieldRate.toFixed(1) + "%" : "未檢查"} (${getYieldLabel(yieldRate)})\n\n`;
+
+    CHECKLIST_DATA.forEach((cat) => {
+      const cy = getCategoryYield(cat);
+      report += `## ${cat.category} — 良率: ${cy.yield !== null ? cy.yield.toFixed(1) + "%" : "未檢查"}\n`;
+      cat.sections.forEach((sec) => {
+        report += `### ${sec.title}\n`;
+        sec.items.forEach((item) => {
+          const status = checks[item.id] === "pass" ? "✅" : checks[item.id] === "fail" ? "❌" : "⬜";
+          report += `${status} ${item.label}${item.critical ? " [關鍵]" : ""}`;
+          if (item.subOptions && subSelections[item.id]?.length > 0) {
+            report += ` [選用: ${subSelections[item.id].join(", ")}]`;
+          }
+          if (notes[item.id]) report += ` — 備註: ${notes[item.id]}`;
+          report += "\n";
+        });
+        report += "\n";
+      });
+    });
+    return report;
+  };
+
+  const copyReport = () => {
+    navigator.clipboard.writeText(generateReport()).then(() => {
+      setShowExport(false);
+      alert("報告已複製到剪貼簿！");
+    });
+  };
+
+  return (
+    <div style={{
+      fontFamily: "'DM Sans', 'Noto Sans TC', sans-serif",
+      minHeight: "100vh",
+      background: "#0a0a0f",
+      color: "#f0f0f5",
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,500;0,9..40,700;1,9..40,400&family=Noto+Sans+TC:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+          --bg-primary: #0a0a0f;
+          --bg-card: #141420;
+          --bg-hover: #1c1c2c;
+          --text-primary: #f0f0f5;
+          --text-secondary: #b0b0c8;
+          --text-muted: #707090;
+          --border: #2a2a3e;
+          --border-light: #1e1e30;
+          --pass: #4eca7a;
+          --pass-bg: rgba(45,138,86,0.18);
+          --fail: #f06060;
+          --fail-bg: rgba(196,62,62,0.18);
+          --critical-accent: #f0c040;
+          --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+          --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        .qa-root {
+          max-width: 860px;
+          margin: 0 auto;
+          padding: 24px 16px 60px;
+        }
+
+        .qa-header {
+          margin-bottom: 28px;
+        }
+
+        .qa-title {
+          font-family: 'DM Sans', sans-serif;
+          font-size: 22px;
+          font-weight: 700;
+          color: var(--text-primary);
+          letter-spacing: -0.5px;
+          margin-bottom: 6px;
+        }
+
+        .qa-subtitle {
+          font-size: 13px;
+          color: var(--text-muted);
+          font-weight: 400;
+        }
+
+        .asset-input {
+          margin-top: 14px;
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+
+        .asset-input input {
+          flex: 1;
+          padding: 8px 12px;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          background: var(--bg-card);
+          color: var(--text-primary);
+          font-size: 13px;
+          font-family: 'JetBrains Mono', monospace;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+
+        .asset-input input:focus {
+          border-color: #2A6B9C;
+        }
+
+        .progress-bar-container {
+          margin-top: 18px;
+          background: var(--border-light);
+          border-radius: 6px;
+          height: 8px;
+          overflow: hidden;
+          display: flex;
+        }
+
+        .progress-pass {
+          height: 100%;
+          background: var(--pass);
+          transition: width 0.4s ease;
+        }
+
+        .progress-fail {
+          height: 100%;
+          background: var(--fail);
+          transition: width 0.4s ease;
+        }
+
+        .stats-row {
+          display: flex;
+          gap: 16px;
+          margin-top: 10px;
+          font-size: 12px;
+          color: var(--text-secondary);
+          font-weight: 500;
+        }
+
+        .stat-item {
+          display: flex;
+          align-items: center;
+          gap: 5px;
+        }
+
+        .stat-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+        }
+
+        .yield-panel {
+          margin-top: 16px;
+          padding: 16px 18px;
+          background: var(--bg-card);
+          border: 1px solid var(--border);
+          border-radius: 12px;
+        }
+
+        .yield-main {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+
+        .yield-number {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 36px;
+          font-weight: 700;
+          letter-spacing: -1px;
+          line-height: 1;
+        }
+
+        .yield-info {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+
+        .yield-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .yield-badge {
+          font-size: 11px;
+          font-weight: 600;
+          border: 1.5px solid;
+          border-radius: 4px;
+          padding: 1px 8px;
+          display: inline-block;
+          width: fit-content;
+          letter-spacing: 0.5px;
+        }
+
+        .yield-formula {
+          margin-left: auto;
+          font-size: 11px;
+          font-family: 'JetBrains Mono', monospace;
+          color: var(--text-muted);
+        }
+
+        .yield-categories {
+          margin-top: 14px;
+          padding-top: 14px;
+          border-top: 1px solid var(--border);
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .yield-cat-item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+
+        .yield-cat-icon {
+          width: 22px;
+          height: 22px;
+          border-radius: 5px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 11px;
+          color: white;
+          flex-shrink: 0;
+        }
+
+        .yield-cat-name {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--text-secondary);
+          width: 110px;
+          flex-shrink: 0;
+        }
+
+        .yield-cat-bar-track {
+          flex: 1;
+          height: 6px;
+          background: var(--border-light);
+          border-radius: 3px;
+          overflow: hidden;
+        }
+
+        .yield-cat-bar-fill {
+          height: 100%;
+          border-radius: 3px;
+          transition: width 0.4s ease;
+        }
+
+        .yield-cat-rate {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 13px;
+          font-weight: 600;
+          width: 40px;
+          text-align: right;
+          flex-shrink: 0;
+        }
+
+        .toolbar {
+          display: flex;
+          gap: 6px;
+          margin-top: 18px;
+          flex-wrap: wrap;
+        }
+
+        .tool-btn {
+          padding: 6px 14px;
+          border: 1px solid var(--border);
+          border-radius: 20px;
+          background: var(--bg-card);
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s;
+          font-family: 'Noto Sans TC', sans-serif;
+        }
+
+        .tool-btn:hover {
+          background: var(--bg-hover);
+          border-color: var(--text-muted);
+        }
+
+        .tool-btn.active {
+          background: var(--text-primary);
+          color: var(--bg-primary);
+          border-color: var(--text-primary);
+        }
+
+        .tool-btn.danger {
+          color: var(--fail);
+          border-color: var(--fail);
+        }
+
+        .tool-btn.danger:hover {
+          background: var(--fail-bg);
+        }
+
+        .category-block {
+          margin-top: 28px;
+        }
+
+        .category-header {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 4px;
+          cursor: pointer;
+          user-select: none;
+        }
+
+        .category-icon {
+          font-size: 18px;
+          width: 30px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 8px;
+          color: white;
+          font-weight: 700;
+        }
+
+        .category-name {
+          font-size: 16px;
+          font-weight: 700;
+          color: var(--text-primary);
+          letter-spacing: -0.3px;
+        }
+
+        .category-badge {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-left: auto;
+          font-weight: 500;
+        }
+
+        .section-block {
+          margin-top: 12px;
+          margin-left: 0;
+        }
+
+        .section-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px 12px;
+          background: var(--bg-hover);
+          border-radius: 8px;
+          cursor: pointer;
+          user-select: none;
+          transition: background 0.15s;
+        }
+
+        .section-header:hover {
+          background: var(--border-light);
+        }
+
+        .section-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: var(--text-primary);
+        }
+
+        .section-badge {
+          margin-left: auto;
+          font-size: 11px;
+          font-weight: 500;
+          padding: 2px 8px;
+          border-radius: 10px;
+        }
+
+        .section-badge.complete {
+          background: var(--pass-bg);
+          color: var(--pass);
+        }
+
+        .section-badge.incomplete {
+          color: var(--text-muted);
+          background: transparent;
+        }
+
+        .section-badge.has-fail {
+          background: var(--fail-bg);
+          color: var(--fail);
+        }
+
+        .chevron {
+          font-size: 10px;
+          color: var(--text-muted);
+          transition: transform 0.2s;
+        }
+
+        .chevron.open {
+          transform: rotate(90deg);
+        }
+
+        .items-list {
+          padding: 4px 0 4px 0;
+        }
+
+        .check-item {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding: 10px 12px;
+          border-bottom: 1px solid var(--border-light);
+          transition: background 0.1s;
+        }
+
+        .check-item:last-child {
+          border-bottom: none;
+        }
+
+        .check-item:hover {
+          background: var(--bg-hover);
+        }
+
+        .check-buttons {
+          display: flex;
+          gap: 4px;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+
+        .check-btn {
+          width: 26px;
+          height: 26px;
+          border-radius: 6px;
+          border: 1.5px solid var(--border);
+          background: var(--bg-card);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 13px;
+          transition: all 0.15s;
+          color: var(--text-muted);
+        }
+
+        .check-btn:hover {
+          border-color: var(--text-secondary);
+        }
+
+        .check-btn.pass-active {
+          background: var(--pass);
+          border-color: var(--pass);
+          color: white;
+        }
+
+        .check-btn.fail-active {
+          background: var(--fail);
+          border-color: var(--fail);
+          color: white;
+        }
+
+        .item-content {
+          flex: 1;
+          min-width: 0;
+        }
+
+        .item-label {
+          font-size: 13px;
+          color: var(--text-primary);
+          line-height: 1.55;
+          font-weight: 400;
+        }
+
+        .item-label.checked-pass {
+          color: var(--text-secondary);
+        }
+
+        .item-label.checked-fail {
+          color: var(--fail);
+        }
+
+        .critical-tag {
+          display: inline-block;
+          font-size: 10px;
+          font-weight: 600;
+          color: var(--critical-accent);
+          border: 1px solid var(--critical-accent);
+          border-radius: 4px;
+          padding: 0 4px;
+          margin-left: 6px;
+          vertical-align: middle;
+          letter-spacing: 0.5px;
+        }
+
+        .item-note {
+          font-size: 11px;
+          color: var(--text-muted);
+          margin-top: 3px;
+          font-style: italic;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+
+        .sub-options {
+          display: flex;
+          gap: 6px;
+          margin-top: 6px;
+          flex-wrap: wrap;
+        }
+
+        .sub-chip {
+          padding: 3px 14px;
+          border-radius: 14px;
+          border: 1.5px solid var(--border);
+          background: var(--bg-card);
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-family: 'JetBrains Mono', monospace;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.15s;
+          letter-spacing: 0.3px;
+        }
+
+        .sub-chip:hover {
+          border-color: #1B7A5A;
+          color: #1B7A5A;
+        }
+
+        .sub-chip-active {
+          background: #1B7A5A;
+          border-color: #1B7A5A;
+          color: white;
+        }
+
+        .sub-chip-active:hover {
+          background: #156b4d;
+          border-color: #156b4d;
+          color: white;
+        }
+
+        .note-btn {
+          background: none;
+          border: none;
+          color: var(--text-muted);
+          cursor: pointer;
+          font-size: 14px;
+          padding: 2px;
+          opacity: 0.5;
+          transition: opacity 0.15s;
+          flex-shrink: 0;
+          margin-top: 1px;
+        }
+
+        .note-btn:hover {
+          opacity: 1;
+        }
+
+        .note-btn.has-note {
+          opacity: 0.8;
+          color: var(--critical-accent);
+        }
+
+        .modal-overlay {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.4);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 1000;
+          padding: 20px;
+        }
+
+        .modal-card {
+          background: var(--bg-card);
+          border-radius: 14px;
+          padding: 24px;
+          width: 100%;
+          max-width: 480px;
+          box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+        }
+
+        .modal-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: var(--text-primary);
+          margin-bottom: 12px;
+        }
+
+        .modal-textarea {
+          width: 100%;
+          min-height: 80px;
+          padding: 10px 12px;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          background: var(--bg-primary);
+          color: var(--text-primary);
+          font-size: 13px;
+          font-family: 'Noto Sans TC', sans-serif;
+          resize: vertical;
+          outline: none;
+        }
+
+        .modal-textarea:focus {
+          border-color: #2A6B9C;
+        }
+
+        .modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
+        .modal-btn {
+          padding: 7px 18px;
+          border-radius: 8px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          border: 1px solid var(--border);
+          background: var(--bg-card);
+          color: var(--text-primary);
+          font-family: 'Noto Sans TC', sans-serif;
+          transition: all 0.15s;
+        }
+
+        .modal-btn:hover {
+          background: var(--bg-hover);
+        }
+
+        .modal-btn.primary {
+          background: #2A6B9C;
+          color: white;
+          border-color: #2A6B9C;
+        }
+
+        .modal-btn.primary:hover {
+          background: #1f5a85;
+        }
+
+        .export-content {
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 11px;
+          white-space: pre-wrap;
+          max-height: 300px;
+          overflow-y: auto;
+          background: var(--bg-primary);
+          padding: 14px;
+          border-radius: 8px;
+          border: 1px solid var(--border);
+          color: var(--text-secondary);
+          line-height: 1.6;
+        }
+      `}</style>
+
+      <div className="qa-root">
+        <div className="qa-header">
+          <div className="qa-title">3D Asset QA Checklist</div>
+          <div className="qa-subtitle">Digital Twin 數位資產品質檢查表 — {totalCount} 個檢查項目</div>
+
+          <div className="asset-input">
+            <input
+              type="text"
+              placeholder="輸入 Asset 名稱（例：WarningSign_A01_PR_NVD_01）"
+              value={assetName}
+              onChange={(e) => setAssetName(e.target.value)}
+            />
+          </div>
+
+          <div className="progress-bar-container">
+            <div className="progress-pass" style={{ width: `${(passedCount / totalCount) * 100}%` }} />
+            <div className="progress-fail" style={{ width: `${(failedCount / totalCount) * 100}%` }} />
+          </div>
+
+          <div className="stats-row">
+            <div className="stat-item">
+              <div className="stat-dot" style={{ background: "var(--pass)" }} />
+              通過 {passedCount}
+            </div>
+            <div className="stat-item">
+              <div className="stat-dot" style={{ background: "var(--fail)" }} />
+              不通過 {failedCount}
+            </div>
+            <div className="stat-item">
+              <div className="stat-dot" style={{ background: "var(--border)" }} />
+              未檢查 {uncheckedCount}
+            </div>
+            <div className="stat-item" style={{ marginLeft: "auto" }}>
+              完成 {Math.round(progress)}%
+            </div>
+          </div>
+
+          <div className="yield-panel">
+            <div className="yield-main">
+              <div className="yield-number" style={{ color: getYieldColor(yieldRate) }}>
+                {yieldRate !== null ? `${yieldRate.toFixed(1)}%` : "—"}
+              </div>
+              <div className="yield-info">
+                <div className="yield-title">Asset 良率</div>
+                <div className="yield-badge" style={{ color: getYieldColor(yieldRate), borderColor: getYieldColor(yieldRate) }}>
+                  {getYieldLabel(yieldRate)}
+                </div>
+              </div>
+              <div className="yield-formula">
+                通過項目 / 已檢查項目 = {passedCount} / {checkedCount || "—"}
+              </div>
+            </div>
+            <div className="yield-categories">
+              {CHECKLIST_DATA.map((cat) => {
+                const cy = getCategoryYield(cat);
+                return (
+                  <div key={cat.category} className="yield-cat-item">
+                    <div className="yield-cat-icon" style={{ background: cat.color }}>{cat.icon}</div>
+                    <div className="yield-cat-name">{cat.category}</div>
+                    <div className="yield-cat-bar-track">
+                      <div
+                        className="yield-cat-bar-fill"
+                        style={{
+                          width: cy.yield !== null ? `${cy.yield}%` : "0%",
+                          background: getYieldColor(cy.yield),
+                        }}
+                      />
+                    </div>
+                    <div className="yield-cat-rate" style={{ color: getYieldColor(cy.yield) }}>
+                      {cy.yield !== null ? `${cy.yield.toFixed(0)}%` : "—"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="toolbar">
+            {[
+              { key: "all", label: "全部" },
+              { key: "unchecked", label: "未檢查" },
+              { key: "critical", label: "關鍵項目" },
+              { key: "failed", label: "不通過" },
+            ].map((f) => (
+              <button
+                key={f.key}
+                className={`tool-btn ${filterMode === f.key ? "active" : ""}`}
+                onClick={() => setFilterMode(f.key)}
+              >
+                {f.label}
+              </button>
+            ))}
+            <button className="tool-btn" onClick={() => setShowExport(true)}>
+              匯出報告
+            </button>
+            <button className="tool-btn danger" onClick={resetAll}>
+              重置
+            </button>
+          </div>
+        </div>
+
+        {CHECKLIST_DATA.map((cat) => {
+          const catKey = cat.category;
+          const catItems = cat.sections.flatMap((s) => s.items);
+          const catVisible = cat.sections.some((s) => s.items.some(shouldShowItem));
+          if (!catVisible) return null;
+
+          const catPassed = catItems.filter((i) => checks[i.id] === "pass").length;
+          const catTotal = catItems.length;
+
+          return (
+            <div key={catKey} className="category-block">
+              <div className="category-header" onClick={() => toggleCollapse(catKey)}>
+                <div className="category-icon" style={{ background: cat.color }}>
+                  {cat.icon}
+                </div>
+                <span className="category-name">{cat.category}</span>
+                <span className="category-badge">{catPassed}/{catTotal}</span>
+                <span className={`chevron ${!collapsed[catKey] ? "open" : ""}`}>▶</span>
+              </div>
+
+              {!collapsed[catKey] &&
+                cat.sections.map((sec) => {
+                  const secKey = `${catKey}-${sec.title}`;
+                  const visibleItems = sec.items.filter(shouldShowItem);
+                  if (visibleItems.length === 0) return null;
+
+                  const stats = getSectionStats(sec);
+                  const badgeClass =
+                    stats.failed > 0
+                      ? "has-fail"
+                      : stats.unchecked === 0
+                      ? "complete"
+                      : "incomplete";
+
+                  return (
+                    <div key={secKey} className="section-block">
+                      <div
+                        className="section-header"
+                        onClick={() => toggleCollapse(secKey)}
+                      >
+                        <span className={`chevron ${!collapsed[secKey] ? "open" : ""}`}>▶</span>
+                        <span className="section-title">{sec.title}</span>
+                        <span className={`section-badge ${badgeClass}`}>
+                          {stats.passed}/{stats.total}
+                          {stats.failed > 0 && ` · ${stats.failed} fail`}
+                        </span>
+                      </div>
+
+                      {!collapsed[secKey] && (
+                        <div className="items-list">
+                          {visibleItems.map((item) => (
+                            <div key={item.id} className="check-item">
+                              <div className="check-buttons">
+                                <button
+                                  className={`check-btn ${checks[item.id] === "pass" ? "pass-active" : ""}`}
+                                  onClick={() => setCheck(item.id, "pass")}
+                                  title="通過"
+                                >
+                                  ✓
+                                </button>
+                                <button
+                                  className={`check-btn ${checks[item.id] === "fail" ? "fail-active" : ""}`}
+                                  onClick={() => setCheck(item.id, "fail")}
+                                  title="不通過"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                              <div className="item-content">
+                                <div
+                                  className={`item-label ${
+                                    checks[item.id] === "pass"
+                                      ? "checked-pass"
+                                      : checks[item.id] === "fail"
+                                      ? "checked-fail"
+                                      : ""
+                                  }`}
+                                >
+                                  {item.label}
+                                  {item.critical && <span className="critical-tag">關鍵</span>}
+                                </div>
+                                {item.subOptions && (
+                                  <div className="sub-options">
+                                    {item.subOptions.map((opt) => {
+                                      const selected = (subSelections[item.id] || []).includes(opt);
+                                      return (
+                                        <button
+                                          key={opt}
+                                          className={`sub-chip ${selected ? "sub-chip-active" : ""}`}
+                                          onClick={() => toggleSubOption(item.id, opt)}
+                                        >
+                                          {opt}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {notes[item.id] && (
+                                  <div className="item-note">📝 {notes[item.id]}</div>
+                                )}
+                              </div>
+                              <button
+                                className={`note-btn ${notes[item.id] ? "has-note" : ""}`}
+                                onClick={() => openNote(item.id)}
+                                title="備註"
+                              >
+                                ✎
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          );
+        })}
+      </div>
+
+      {editingNote && (
+        <div className="modal-overlay" onClick={() => saveNote()}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">備註</div>
+            <textarea
+              className="modal-textarea"
+              value={noteInput}
+              onChange={(e) => setNoteInput(e.target.value)}
+              placeholder="輸入檢查備註..."
+              autoFocus
+            />
+            <div className="modal-actions">
+              <button className="modal-btn" onClick={() => setEditingNote(null)}>
+                取消
+              </button>
+              <button className="modal-btn primary" onClick={saveNote}>
+                儲存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showExport && (
+        <div className="modal-overlay" onClick={() => setShowExport(false)}>
+          <div className="modal-card" style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">QA 檢查報告</div>
+            <div className="export-content">{generateReport()}</div>
+            <div className="modal-actions">
+              <button className="modal-btn" onClick={() => setShowExport(false)}>
+                關閉
+              </button>
+              <button className="modal-btn primary" onClick={copyReport}>
+                複製報告
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
