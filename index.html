@@ -66,9 +66,7 @@
           {
             title: "LOD 系統",
             items: [
-              { id: "lod-1", label: "LOD_0 = 原始 Asset polycounts (≤200,000)" },
-              { id: "lod-2", label: "LOD_1 = LOD_0 的 50%（≤100,000）" },
-              { id: "lod-3", label: "後續 LOD 層級依比例類推，確認各層級正常顯示" },
+              { id: "lod-1", label: "已建立 LOD 系統" },
             ],
           },
           {
@@ -76,7 +74,6 @@
             items: [
               { id: "name-1", label: "最外層 Xform 使用駝峰式命名", critical: true },
               { id: "name-2", label: "底下 Mesh 命名為 SM_Xxxxx (Static Mesh 底線)" },
-              { id: "name-3", label: "層級結構正確（如 WarningSign_A01_PR_NVD_01 → SM_WarningSign_A01_01 → Looks）" },
             ],
           },
           {
@@ -266,6 +263,24 @@
         const failed = section.items.filter((i) => checks[i.id] === "fail").length;
         return { total, passed, failed, unchecked: total - passed - failed };
       };
+
+      const isValidXformName = (name) =>
+        /^[A-Z][A-Za-z0-9]*(_[A-Za-z0-9]+)*$/.test(name);
+
+      const deriveBaseName = (name) => {
+        const parts = name.split("_");
+        if (parts.length >= 5) {
+          const first = parts[0];
+          const second = parts[1];
+          const last = parts[parts.length - 1];
+          const middle = parts.slice(2, -1).filter((p) => !/^[A-Z]{2,4}$/.test(p));
+          return [first, second, ...middle, last].join("_");
+        }
+        return name;
+      };
+
+      const deriveMeshName = (name) => "SM_" + deriveBaseName(name);
+      const deriveMaterialName = (name) => "M_" + deriveBaseName(name);
 
       const shouldShowItem = (item) => {
         if (filterMode === "all") return true;
@@ -922,6 +937,68 @@
               background: #1f5a85;
             }
 
+            .naming-preview {
+              margin-top: 10px;
+              padding: 12px 14px;
+              background: var(--bg-card);
+              border: 1px solid var(--border);
+              border-radius: 8px;
+            }
+
+            .naming-preview-title {
+              font-size: 11px;
+              color: var(--text-muted);
+              font-weight: 500;
+              margin-bottom: 8px;
+              letter-spacing: 0.3px;
+            }
+
+            .naming-node {
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              padding: 3px 0;
+              font-size: 12px;
+              font-family: 'JetBrains Mono', monospace;
+            }
+
+            .naming-connector {
+              color: var(--border);
+              width: 14px;
+              text-align: center;
+              flex-shrink: 0;
+            }
+
+            .naming-tag {
+              font-size: 10px;
+              font-weight: 600;
+              padding: 1px 6px;
+              border-radius: 3px;
+              letter-spacing: 0.5px;
+              min-width: 44px;
+              text-align: center;
+              flex-shrink: 0;
+            }
+
+            .naming-tag.xform { background: rgba(42,107,156,0.25); color: #6aadde; }
+            .naming-tag.mesh  { background: rgba(27,122,90,0.25);  color: #4eca7a; }
+            .naming-tag.looks { background: rgba(139,74,43,0.25);  color: #d4855a; }
+            .naming-tag.mat   { background: rgba(120,60,140,0.25); color: #c07ad4; }
+
+            .naming-value {
+              color: var(--text-primary);
+              flex: 1;
+            }
+
+            .naming-status {
+              font-size: 11px;
+              font-family: 'Noto Sans TC', sans-serif;
+              flex-shrink: 0;
+            }
+
+            .naming-status.ok  { color: var(--pass); }
+            .naming-status.err { color: var(--fail); }
+
             .export-content {
               font-family: 'JetBrains Mono', monospace;
               font-size: 11px;
@@ -950,6 +1027,37 @@
                   onChange={(e) => setAssetName(e.target.value)}
                 />
               </div>
+
+              {assetName && (
+                <div className="naming-preview">
+                  <div className="naming-preview-title">命名層級預覽</div>
+                  <div className="naming-node">
+                    <span className="naming-connector"> </span>
+                    <span className="naming-tag xform">Xform</span>
+                    <span className="naming-value">{assetName}</span>
+                    {isValidXformName(assetName)
+                      ? <span className="naming-status ok">✓ 駝峰式</span>
+                      : <span className="naming-status err">✕ 非駝峰式</span>}
+                  </div>
+                  <div className="naming-node" style={{ paddingLeft: 14 }}>
+                    <span className="naming-connector">├</span>
+                    <span className="naming-tag mesh">Mesh</span>
+                    <span className="naming-value">{deriveMeshName(assetName)}</span>
+                  </div>
+                  <div className="naming-node" style={{ paddingLeft: 14 }}>
+                    <span className="naming-connector">└</span>
+                    <span className="naming-tag looks">Looks</span>
+                  </div>
+                  <div className="naming-node" style={{ paddingLeft: 28 }}>
+                    <span className="naming-connector">└</span>
+                    <span className="naming-tag mat">Mat</span>
+                    <span className="naming-value">{deriveMaterialName(assetName)}</span>
+                    {isValidXformName(deriveMaterialName(assetName).slice(2))
+                      ? <span className="naming-status ok">✓ 駝峰式</span>
+                      : <span className="naming-status err">✕ 非駝峰式</span>}
+                  </div>
+                </div>
+              )}
 
               <div className="progress-bar-container">
                 <div className="progress-pass" style={{ width: `${(passedCount / totalCount) * 100}%` }} />
